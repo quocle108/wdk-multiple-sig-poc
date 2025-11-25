@@ -156,6 +156,17 @@ const bobStorage = new AutobaseStorageAdapter({
   bootstrapKey: aliceStorage.base.key
 })
 await bobStorage.init()
+
+const aliceManager = new SafeMultisigEVM(ALICE_SEED_PHRASE, "0'/0/0", {
+  provider: SEPOLIA_RPC,
+  network: 'sepolia',
+  storage: aliceStorage
+})
+const bobManager = new SafeMultisigEVM(BOB_SEED_PHRASE, "0'/0/0", {
+  provider: SEPOLIA_RPC,
+  network: 'sepolia',
+  storage: bobStorage
+})
 ```
 
 **Use for:** P2P coordination, distributed teams
