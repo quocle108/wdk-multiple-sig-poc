@@ -1,0 +1,4 @@
+node_modules
+coverage
+evm-test-data
+btc-test-data
