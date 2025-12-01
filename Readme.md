@@ -7,6 +7,7 @@ Proof-of-concept for Bitcoin and EVM multisig wallets with P2P coordination.
 - **Bitcoin P2WSH** - Native SegWit multisig on Bitcoin/Testnet
 - **Safe Protocol** - Smart contract multisig on EVM chains (Ethereum, Polygon, Arbitrum)
 - **ERC-4337 Account Abstraction** - Bundler-based execution with ERC-20 gas payment
+- **Safe Transaction Service API** - Serverless coordination via Safe's infrastructure
 - **Owner Management** - Add/remove owners and change threshold (Safe only)
 - **Flexible Storage** - P2P sync (Autobase), in-memory (testing), or manual export/import
 - **Simple API** - Same workflow for both Bitcoin and EVM
@@ -39,6 +40,12 @@ node examples/example-bitcoin-memory.js
 # ERC-4337 with bundler
 node examples/example-evm-4337-memory.js              # ETH gas
 node examples/example-evm-4337-memory.js --paymaster  # USDC gas
+
+# ERC-4337 with Safe API (no local storage needed!)
+node examples/example-safe-api-4337.js --create           # Create ETH gas Safe
+node examples/example-safe-api-4337.js --create --gasless # Create Gasless Safe
+node examples/example-safe-api-4337.js                    # Test with existing Safe
+node examples/example-safe-api-4337.js --gasless          # Deploy + Approve + TX (zero ETH!)
 
 # P2P coordination (Autobase storage)
 node examples/example-evm-autobase.js
@@ -145,6 +152,84 @@ await bob.sign(proposalId)
 
 // Execute via bundler (no ETH needed for gas if using paymaster)
 await alice.execute(proposalId)
+```
+
+### EVM with ERC-4337 + Safe API 
+Uses Safe Transaction Service API for coordination 
+
+```javascript
+import { SafeMultisigEVM4337Api } from './src/SafeMultisigEVM4337Api.js'
+
+// Config for ETH gas payment
+const config = {
+  provider: 'https://eth-sepolia.g.alchemy.com/v2/KEY',
+  chainId: 11155111n,
+  bundlerUrl: 'https://api.pimlico.io/v2/sepolia/rpc?apikey=KEY',
+  safeModulesVersion: '0.2.0'  // EntryPoint v0.6
+}
+
+// Create managers (no storage needed!)
+const alice = new SafeMultisigEVM4337Api(aliceSeed, "0'/0/0", config)
+const bob = new SafeMultisigEVM4337Api(bobSeed, "0'/0/0", config)
+
+// Create 2-of-2 multisig
+const owners = [aliceAddress, bobAddress]
+const result = await alice.create(owners, 2)
+console.log(`Safe Address: ${result.address}`)
+
+// Import Safe (Bob on different machine)
+await bob.import(result.address, { owners, threshold: 2 })
+
+// Alice proposes transaction
+const safeOpHash = await alice.propose({
+  to: '0x...',
+  value: '1000000000000000'
+})
+
+// Bob signs (fetches from Safe API, signs, uploads)
+await bob.signProposal(safeOpHash)
+
+// Execute via bundler
+const txResult = await alice.execute(safeOpHash)
+console.log(`TX Hash: ${txResult.txHash}`)
+```
+
+### Gasless Safe (Zero ETH Required!)
+
+```javascript
+import { SafeMultisigEVM4337Api } from './src/SafeMultisigEVM4337Api.js'
+import { ethers } from 'ethers'
+
+const USDC_SEPOLIA = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'
+const PIMLICO_PAYMASTER = '0x6666666666667849c56f2850848ce1c4da65c68b'
+
+// Config with paymaster for USDC gas payment
+const config = {
+  provider: 'https://eth-sepolia.g.alchemy.com/v2/KEY',
+  chainId: 11155111n,
+  bundlerUrl: 'https://api.pimlico.io/v2/sepolia/rpc?apikey=KEY',
+  safeModulesVersion: '0.2.0',
+  paymasterOptions: {
+    paymasterUrl: 'https://api.pimlico.io/v2/sepolia/rpc?apikey=KEY',
+    paymasterAddress: PIMLICO_PAYMASTER,
+    paymasterTokenAddress: USDC_SEPOLIA,
+    amountToApprove: ethers.utils.parseUnits('1000000', 6)  // 1M USDC approval
+  }
+}
+
+const alice = new SafeMultisigEVM4337Api(aliceSeed, "0'/0/0", config)
+const bob = new SafeMultisigEVM4337Api(bobSeed, "0'/0/0", config)
+
+// Create gasless Safe
+const result = await alice.create(owners, 2)
+
+// First transaction does everything in one UserOp:
+// 1. Deploy Safe
+// 2. Approve paymaster for USDC
+// 3. Execute your transaction
+const safeOpHash = await alice.propose({ to: '0x...', value: '0', data: '0x' })
+await bob.signProposal(safeOpHash)
+await alice.execute(safeOpHash)  // All paid with USDC!
 ```
 
 ### Bitcoin
